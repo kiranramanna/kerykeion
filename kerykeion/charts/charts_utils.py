@@ -1,9 +1,17 @@
 import math
 import datetime
 from kerykeion.kr_types import KerykeionException, ChartType
-from typing import Union, Literal
+from typing import Union, Literal, TYPE_CHECKING
 from kerykeion.kr_types.kr_models import AspectModel, KerykeionPointModel
-from kerykeion.kr_types.settings_models import KerykeionLanguageCelestialPointModel, KerykeionSettingsAspectModel
+from kerykeion.kr_types.settings_models import (
+    KerykeionLanguageCelestialPointModel,
+    KerykeionSettingsAspectModel,
+    KerykeionSettingsModel,
+    KerykeionLanguageModel
+)
+
+if TYPE_CHECKING:
+    from kerykeion.astrological_subject import AstrologicalSubject
 
 
 def get_decoded_kerykeion_celestial_point_name(input_planet_name: str, celestial_point_language: KerykeionLanguageCelestialPointModel) -> str:
@@ -1034,9 +1042,117 @@ def draw_transit_aspect_grid(
             svg_output += f'<rect x="{x_aspect}" y="{y_aspect}" width="{box_size}" height="{box_size}" style="{style}"/>'
             x_aspect += box_size
 
-            # Check for aspects between the planets
             for aspect in aspects:
                 if (aspect["p1"] == planet_a["id"] and aspect["p2"] == planet_b["id"]):
                     svg_output += f'<use  x="{x_aspect - box_size + 1}" y="{y_aspect + 1}" xlink:href="#orb{aspect["aspect_degrees"]}" />'
 
     return svg_output
+
+def draw_vedic_chart(
+    settings: 'KerykeionSettingsModel',
+    subject: 'AstrologicalSubject',
+    language: 'KerykeionLanguageModel',
+) -> str:
+    '''
+    Draws a South Indian style Vedic chart.
+
+    Args:
+        settings (KerykeionChartSettingsModel): Chart settings.
+        subject (KerykeionSubject): The subject of the chart.
+        language (KerykeionLanguageSettingsModel): Language settings.
+
+    Returns:
+        str: SVG string for the Vedic chart.
+    '''
+    svg_output = "<g id='vedic_chart_grid'>"
+    width = 400
+    height = 300
+    box_width = width / 4
+    box_height = height / 3
+    stroke_color = 'var(--color-stroke)'
+
+    signs_pos = {
+        'Aries': (0, 0), 'Taurus': (1, 0), 'Gemini': (2, 0), 'Cancer': (3, 0),
+        'Leo': (3, 1), 'Virgo': (3, 2), 'Libra': (2, 2), 'Scorpio': (1, 2),
+        'Sagittarius': (0, 2), 'Capricorn': (0, 1), 'Aquarius': (1, 1), 'Pisces': (2, 1)
+    }
+    all_signs = list(signs_pos.keys())
+
+    # Determine house positions based on Ascendant
+    asc_index = subject.first_house.sign_num
+    house_to_sign = {i + 1: all_signs[(asc_index + i) % 12] for i in range(12)}
+    sign_to_house = {v: k for k, v in house_to_sign.items()}
+
+    # Draw the grid and houses
+    for row in range(3):
+        for col in range(4):
+            x = col * box_width
+            y = row * box_height
+            svg_output += f"<rect x='{x}' y='{y}' width='{box_width}' height='{box_height}' style='fill:none; stroke-width:1; stroke:{stroke_color}' />"
+
+            # Find which sign this box corresponds to
+            sign_at_pos = None
+            for sign, pos in signs_pos.items():
+                if pos == (col, row):
+                    sign_at_pos = sign
+                    break
+            
+            if sign_at_pos:
+                house_num = sign_to_house.get(sign_at_pos)
+                if house_num:
+                    svg_output += f"<text x='{x + 5}' y='{y + 15}' style='font-size:10px; fill:var(--color-text)'>{house_num}</text>"
+
+    # Place planets
+    # Create a list of planets to iterate over
+    planets_list = [
+        subject.sun,
+        subject.moon,
+        subject.mercury,
+        subject.venus,
+        subject.mars,
+        subject.jupiter,
+        subject.saturn,
+        subject.uranus,
+        subject.neptune,
+        subject.pluto,
+        subject.mean_node,
+        subject.true_node,
+        subject.mean_south_node,
+        subject.true_south_node,
+    ]
+
+    if hasattr(subject, 'chiron'):
+        planets_list.append(subject.chiron)
+
+    planets_in_sign = {sign: [] for sign in all_signs}
+    for planet in planets_list:
+        planet_sign_full = all_signs[planet.sign_num]
+        planets_in_sign[planet_sign_full].append(planet)
+
+    for sign, planets in planets_in_sign.items():
+        col, row = signs_pos[sign]
+        x = col * box_width
+        y = row * box_height
+        for i, planet in enumerate(planets):
+            inner_col = i % 2
+            inner_row = i // 2
+            planet_x = x + 15 + inner_col * 30
+            planet_y = y + 30 + inner_row * 20
+
+            svg_output += f"<g transform='translate({planet_x}, {planet_y})'>"
+            svg_output += f"<use transform='scale(0.5)' xlink:href='#{planet.name}' />"
+            if planet.retrograde:
+                svg_output += "<use transform='translate(10, -5) scale(0.4)' xlink:href='#retrograde' />"
+            svg_output += "</g>"
+
+    # Mark Ascendant
+    asc_sign_full = all_signs[subject.first_house.sign_num]
+    col, row = signs_pos[asc_sign_full]
+    x1 = col * box_width
+    y1 = row * box_height
+    x2 = x1 + box_width
+    y2 = y1 + box_height
+    svg_output += f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y1 + 20}' style='stroke:{stroke_color};stroke-width:1' />"
+    svg_output += f"<line x1='{x1}' y1='{y1}' x2='{x1 + 20}' y2='{y1}' style='stroke:{stroke_color};stroke-width:1' />"
+
+    return svg_output + "</g>"
